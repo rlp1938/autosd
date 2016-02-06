@@ -1,0 +1,13 @@
+README for autosd.
+
+The purpose of the program is to shutdown a laptop when mains power is
+off and the battery energy falls to a user determined level.
+
+The program is intended to be run under `cron` or similar.
+
+The parameters the program uses are set in a file $HOME/.config/autosd
+which is automatically installed on the first run of the program. As
+installed the parameters will suit a lappy with about 1 hour battery
+life. You can turn the mains off and run it using the -m | --monitor
+option from a console and work out what suits your machine and the
+load it carries when running unattended.
