@@ -20,52 +20,27 @@
 
 #include "fileops.h"
 
+fdata readtextfile(const char *filename, off_t extra, int fatal)
+{	// checks that file terminates with '\n' if not appends it.
+	fdata txtdat = readfile(filename, extra + 1, fatal);
+	char *lastbyte = txtdat.to - extra - 1;
+	if (*lastbyte == '\0') *lastbyte = '\n';
+	return txtdat;
+} // readtextfile()
+
 fdata readfile(const char *filename, off_t extra, int fatal)
 {
     FILE *fpi;
-    off_t bytesread;
-    char *from, *to;
-    fdata data;
+    size_t bytesread;
+    fdata data = {0};
     struct stat sb;
-
-    if (stat(filename, &sb) == -1) {
-        if (fatal){
-            perror(filename);
-            exit(EXIT_FAILURE);
-        } else {
-            data.from = (char *)NULL;
-            data.to = (char *)NULL;
-            return data;
-        }
-    }
-
-    fpi = fopen(filename, "r");
-    if(!(fpi)) {
-        perror(filename);
-        exit(EXIT_FAILURE);
-    }
-
-    from = malloc(sb.st_size + extra);
-    if (!(from)) {
-        perror("malloc failure in readfile()");
-        exit(EXIT_FAILURE);
-    }
-
-	bytesread = fread(from, 1, sb.st_size, fpi);
+    if (dostat(filename, &sb, fatal) == -1)	return data;
+    fpi = dofopen(filename, "r");
+    data.from = docalloc(sb.st_size + extra, sizeof(char), "readfile");
+	bytesread = dofread(filename, data.from, sb.st_size, fpi);
 	fclose (fpi);
-	if (bytesread != sb.st_size) {
-		fprintf(stderr, "Size error: expected %lu, got %lu\n",
-				sb.st_size, bytesread);
-		perror(filename);
-		exit(EXIT_FAILURE);
-	}
-    to = from + bytesread + extra;
-    // zero the extra space
-    memset(from+bytesread, 0, to-(from+bytesread));
-    data.from = from;
-    data.to = to;
+    data.to = data.from + bytesread + extra;
     return data;
-
 } // readfile()
 
 FILE *dofopen(const char *fn, const char *fmode)
@@ -81,44 +56,11 @@ FILE *dofopen(const char *fn, const char *fmode)
 void writefile(const char *to_write, const char *from, const char *to,
 				const char *mode)
 {
-/*	FILE *fpo;
-	if (strcmp("-", to_write) == 0) {
-		fpo = stdout;
-	} else {
-		fpo = dofopen(to_write, mode);
-	}
-	size_t numbytes = to - from;
-	size_t written = fwrite(from, 1, numbytes, fpo);
-	if (numbytes != written) {
-		fprintf(stderr, "Expected to write %ld bytes but wrote %ld\n",
-					numbytes, written);
-		perror(to_write);
-		exit(EXIT_FAILURE);
-	}
-	fclose(fpo);
-*/
-	/* rewritten using syscalls because the library calls seem to be
-	 * completely fucked up. */
-	mode_t opmode;
-	int oflags = S_IRUSR | S_IWUSR;
-	if (strcmp("w", mode) == 0) {
-		opmode = O_CREAT | O_TRUNC | O_WRONLY;
-	} else if (strcmp("a", mode) == 0) {
-		opmode = O_APPEND | O_WRONLY;
-	} else {
-		fprintf(stderr, "Open mode must be 'w|a', you had %s.\n", mode);
-		exit(EXIT_FAILURE);
-	}
 	int ofd;
 	if (strcmp("-", to_write) == 0) {
 		ofd = 1;	// stdout
 	} else {
-		ofd = open(to_write, opmode, oflags);
-		if (ofd == -1) {
-			fprintf(stderr, "Open failure on %s\n", to_write);
-			perror(to_write);
-			exit(EXIT_FAILURE);
-		}
+		ofd = doopen(to_write, mode);
 	}
 	ssize_t towrite = to - from;
 	ssize_t written = write(ofd, from, towrite);
@@ -149,16 +91,6 @@ int fileexists(const char *path)
 
 fdata mem2str(char *pfrom, char *pto)
 {
-	/*
-	 * Checks that last char in memory is '\n', and if not reallocs
-	 * the memory area by 1 byte extra and copies '\n' to that byte.
-	 * Then replaces all '\n' with '\0' and returns the altered data.
-	 *
-	 * Usage:
-	 * fdata mydat = readfile("file", 0, 1);
-	 * mydat = mem2str(mydat.from, mydat.to);
-	 * ...
-	*/
 	char *from = pfrom;
 	char *to = pto;
 	// check last char is '\n'
@@ -199,7 +131,6 @@ void doread(int fd, size_t bcount, char *result)
 		perror(buf);
 		exit(EXIT_FAILURE);
 	}
-
 	strncpy(result, buf, res);
 	result[res] = '\0';
 } // doread()
@@ -300,80 +231,13 @@ char *gettmpfn(void)
 } // gettmpfn()
 
 char **readcfg(const char *relpath)
-{
-	/*
-	 * reads a configuration that contains data in the form:
-	 * somevar=somevalue along with comments beginning with '#'
-	 * and returns the actual configuration strings in a NULL terminated
-	 * list of C strings.
-	*/
-
-	// construct the real path to the config file
-	char rpath[PATH_MAX];
-	char *home=getenv("HOME");
-	if (!home) {
-		perror("HOME");
-		exit(EXIT_FAILURE);
-	}
-	strcpy(rpath, home);
-	if (rpath[strlen(rpath)-1] != '/') {
-		strcat(rpath, "/");
-	}
-	strcat(rpath, relpath);
-
-	// read the config file into memory
-	fdata rcdat = readfile(rpath, 0, 1);
-
-	// replace all commented text with ' '
-	int incmt = 0;
-	char *cp = rcdat.from;
-	while (cp < rcdat.to) {
-		if (*cp == '#') {
-			incmt = 1;
-		} else if (*cp == '\n') {
-			incmt = 0;
-		}
-		if (incmt) {
-			*cp = ' ';
-		}
-		cp++;
-	}
-
-	// count lines needed
-	int lcount = 0;
-	cp = rcdat.from;
-	while (cp < rcdat.to) {
-		while(isspace(*cp) && cp < rcdat.to) cp++;
-		// now at data line
-		lcount++;
-		char *eol = memchr(cp, '\n', rcdat.to - cp);
-		if (!eol) eol = rcdat.to;	// file not terminated with '\n'?
-		cp = eol + 1;
-	}
-
-	// allocate the char pointers
-	char **retval = calloc(lcount+1, sizeof(char*));
-
-	// make copies of the actual config parameters
-	cp = rcdat.from;
-	int rvidx = 0;
-	while (cp < rcdat.to) {
-		while(isspace(*cp) && cp < rcdat.to) cp++;
-		// now at data line
-		char *eol = memchr(cp, '\n', rcdat.to - cp);
-		if (!eol) eol = rcdat.to;	// file not terminated with '\n'?
-		char *kpeol = eol;
-		// now turn the data line into a C string
-		while (isspace(*eol)) {
-			*eol = '\0';
-			eol--;
-		}
-		// copy data line
-		retval[rvidx] = strdup(cp);
-		rvidx++;
-		cp = kpeol + 1;
-	}
-
+{	// reads a config file; somevar=somevalue + comments '#'
+	char *rpath = get_realpath_home(relpath);
+	fdata rcdat = readtextfile(rpath, 0, 1);
+	comment_text_to_space(rcdat.from, rcdat.to);
+	int lcount = count_cfg_data_lines(rcdat.from, rcdat.to);
+	char **retval = docalloc(lcount+1, sizeof(char*), "readcfg");
+	set_cfg_lines(retval, lcount, rcdat.from, rcdat.to);
 	free(rcdat.from);
 	return retval;
 } // readcfg()
@@ -417,3 +281,136 @@ char *readpseudofile(const char *path, const char datatype)
 	fclose(fpi);
 	return retbuf;
 } // readpseudofile()
+
+int dostat(const char *fn, struct stat *sb, int fatal)
+{
+	int res = stat(fn, sb);
+	if (res == -1) {
+		if (fatal){
+            perror(fn);
+            exit(EXIT_FAILURE);
+		} else {
+			return -1;
+		}
+	} // if(res...)
+	return 0;
+} // dostat()
+
+void *docalloc(size_t nmemb, size_t size, const char *func)
+{
+	char *from = calloc(nmemb, size);
+	if (!from) {
+		fprintf(stderr, "Failed to get memory in %s\n", func);
+		exit(EXIT_FAILURE);
+	}
+	return from;
+} // docalloc()
+
+size_t dofread(const char *fn, void *fro, size_t nbytes, FILE *fpi)
+{	// fread() with error handling
+	size_t wasread = fread(fro, 1, nbytes, fpi);
+	if (wasread != nbytes) {
+		fprintf(stderr, "For file %s, expected to read %lu bytes"
+		" but got %lu\n", fn, nbytes, wasread);
+		exit(EXIT_FAILURE);
+	}
+	return wasread;
+} // dofread()
+
+char *get_realpath_home(const char *relpath)
+{
+	static char rpath[PATH_MAX];
+	char *home=getenv("HOME");
+	if (!home) {
+		perror("HOME");
+		exit(EXIT_FAILURE);
+	}
+	strcpy(rpath, home);
+	if (rpath[strlen(rpath)-1] != '/') {
+		strcat(rpath, "/");
+	}
+	strcat(rpath, relpath);
+	return rpath;
+} // get_realpath_home()
+
+void comment_text_to_space(char *from, const char *to)
+{	// comments begin with '#' to end of line
+	char *cp = from;
+	int incomment = 0;
+	while (cp < to) {
+		switch (*cp) {
+			case '#':
+				incomment = 1;
+				*cp = ' ';
+				break;
+			case '\n':
+				incomment = 0;
+				break;
+			default:
+				if (incomment) *cp = ' ';
+				break;
+		} // switch()
+		cp++;
+	} // while()
+} // comment_text_to_space()
+
+int count_cfg_data_lines(char *from, char *to)
+{	// requires all commented text be converted to ' ' first.
+	char *dl = from;
+	int count = 0;
+	char *eol;
+	while (dl < to) {
+		while(isspace(*dl)) dl++;
+		count++;
+		eol = memchr(dl, '\n', to - dl);
+		if (!eol) eol = to;	// file without terminating '\n'
+		dl = eol;
+	}
+	return count - 1;
+} // count_cfg_data_lines()
+
+void set_cfg_lines(char **lines, int numlines, char *from, char *to)
+{	// lines must have been preconfigured to suit the data
+	char *bol = from;
+	int idx = 0;
+	while (idx < numlines) {
+		while (isspace(*bol)) bol++;
+		char *eol = memchr(bol, '\n', to - bol);
+		char *line_end = eol;
+		while (isspace(*eol)) {
+			*eol = '\0';
+			eol--;
+		}
+		size_t len = strlen(bol);
+		const size_t minlen = 3;	// minimum valid is eg x=3
+		if (len < minlen || len > NAME_MAX - 1) {
+			fprintf(stderr, "Invalid string length in config file"
+			" processing %lu", len);
+			exit(EXIT_FAILURE);
+		}
+		lines[idx] = strdup(bol);
+		idx++;
+		bol = line_end+1;
+	} // while()
+} // set_cfg_lines()
+
+int doopen(const char *fn, const char *mode)
+{	// open() with error handling.
+	mode_t opmode;
+	int oflags = S_IRUSR | S_IWUSR;
+	if (strcmp("w", mode) == 0) {
+		opmode = O_CREAT | O_TRUNC | O_WRONLY;
+	} else if (strcmp("a", mode) == 0) {
+		opmode = O_APPEND | O_WRONLY;
+	} else {
+		fprintf(stderr, "Open mode must be 'w|a', you had %s.\n", mode);
+		exit(EXIT_FAILURE);
+	}
+	int ofd = open(fn, opmode, oflags);
+		if (ofd == -1) {
+			fprintf(stderr, "Open failure on %s\n", fn);
+			perror(fn);
+			exit(EXIT_FAILURE);
+		}
+	return ofd;
+} // doopen()

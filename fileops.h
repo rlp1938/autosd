@@ -42,6 +42,7 @@ typedef struct fdata {
 	char *to;
 }fdata;
 
+fdata readtextfile(const char *filename, off_t extra, int fatal);
 fdata readfile(const char *filename, off_t extra, int fatal);
 void writefile(const char *to_write, const char *from, const char *to,
 				const char *mode);
@@ -56,5 +57,13 @@ int isrunning(char **proglist);
 char *gettmpfn(void);
 char **readcfg(const char *relpath);
 char *readpseudofile(const char *path, const char datatype);
+int dostat(const char *fn, struct stat *sb, int fatal);
+void *docalloc(size_t nmemb, size_t size, const char *func);
+size_t dofread(const char *fn, void *fro, size_t nbytes, FILE *fpi);
+char *get_realpath_home(const char *relpath);
+void comment_text_to_space(char *from, const char *to);
+int count_cfg_data_lines(char *from, char *to);
+void set_cfg_lines(char **lines, int numlines, char *from, char *to);
+int doopen(const char *fn, const char *mode);
 
 #endif
