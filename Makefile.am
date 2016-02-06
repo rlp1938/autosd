@@ -8,4 +8,4 @@ autosd_SOURCES=autosd.c fileops.c firstrun.c getoptions.c fileops.h firstrun.h g
 man_MANS=autosd.1
 autdir=$(datadir)/autosd
 aut_DATA=autosd.cfg
-EXTRA_BUILD=autosd.1 autosd.cfg
+EXTRA_DIST=autosd.1 autosd.cfg
